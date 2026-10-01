@@ -504,11 +504,17 @@ void BaseEnter__InnerAfter(uint baseId, ClientId client)
 		    Hk::Client::GetPlayerSystem(client).value().c_str());
 
 		// print to log if the char has too much money
-		if (const auto value = Hk::Player::GetShipValue((const wchar_t*)Players.GetActiveCharacterName(client)); value.has_value()
-		 && value.value() > 2100000000)
+		if (const wchar_t* wszCharname = (const wchar_t*)Players.GetActiveCharacterName(client); wszCharname)
 		{
-			std::wstring charname = (const wchar_t*)Players.GetActiveCharacterName(client);
-			AddLog(LogType::Normal, LogLevel::Err, std::format("Possible corrupt ship charname={} asset_value={}", wstos(charname), value.value()));
+			// Pass the character name, not the client id, to preserve the
+			// original code path: with a name, ExtractClientID resolves it
+			// and skips SaveChar when the name can't be mapped to a client.
+			const std::wstring charname = wszCharname;
+			if (const auto value = Hk::Player::GetShipValue(charname); value.has_value()
+			 && value.value() > 2100000000)
+			{
+				AddLog(LogType::Normal, LogLevel::Err, std::format("Possible corrupt ship charname={} asset_value={}", wstos(charname), value.value()));
+			}
 		}
 	}
 	CATCH_HOOK({})

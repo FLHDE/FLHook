@@ -13,8 +13,9 @@ namespace Hk::Ini
 	std::string GetAccountDir(ClientId client)
 	{
 		static _GetFLName GetFLName = (_GetFLName)((char*)hModServer + 0x66370);
-		char dirname[1024];
-		GetFLName(dirname, Players[client].Account->wszAccId);
+		char dirname[1024] = "";
+		if (const PlayerData& player = Players[client]; player.Account && player.Account->wszAccId)
+			GetFLName(dirname, player.Account->wszAccId);
 		return dirname;
 	}
 
@@ -27,66 +28,93 @@ namespace Hk::Ini
 	}
 
 	static PlayerData* CurrPlayer;
+	static void* Cb_UpdateFileOriginal;
 	int __stdcall Cb_UpdateFile(char* filename, wchar_t* savetime, int b)
 	{
 		// Call the original save charfile function
 		int retv = 0;
+		if (!CurrPlayer || !filename || !Cb_UpdateFileOriginal)
+			return 0;
+
 		__asm {
 			pushad
 			mov ecx, [CurrPlayer]
 			push b
 			push savetime
 			push filename
-			mov eax, 0x6d4ccd0
+			mov eax, Cb_UpdateFileOriginal
 			call eax
 			mov retv, eax
 			popad
 		}
 
 		// Readd the flhook section.
+		// This runs inside a native FLServer callback, so nothing may escape here.
 		if (retv)
 		{
-			ClientId client = CurrPlayer->iOnlineId;
-
-			std::string path = CoreGlobals::c()->accPath + GetAccountDir(client) + "\\" + filename;
-
-			const bool encryptFiles = !FLHookConfig::c()->general.disableCharfileEncryption;
-
-			const auto writeFlhookSection = [client](std::string& str) 
+			try
 			{
-				str += "\n[flhook]\n";
-				for (const auto& [key, value] : clients[client].lines)
+				ClientId client = CurrPlayer->iOnlineId;
+				if (!Hk::Client::IsValidClientID(client))
+					return retv;
+
+				const std::string path = CoreGlobals::c()->accPath + GetAccountDir(client) + "\\" + filename;
+
+				const bool encryptFiles = !FLHookConfig::c()->general.disableCharfileEncryption;
+
+				const auto writeFlhookSection = [client](std::string& str)
 				{
-					str += wstos(std::format(L"{} = {}\n", key, value));
+					str += "\n[flhook]\n";
+					for (const auto& [key, value] : clients[client].lines)
+					{
+						str += wstos(std::format(L"{} = {}\n", key, value));
+					}
+				};
+
+				std::fstream saveFile;
+				std::string data;
+				if (encryptFiles)
+				{
+					saveFile.open(path, std::ios::ate | std::ios::in | std::ios::out | std::ios::binary);
+					if (!saveFile.is_open())
+						return retv;
+
+					// Copy old version that we plan to rewrite.
+					// tellg() returns -1 on a failed stream; casting that to a
+					// size_t yields SIZE_MAX and std::string then throws
+					// std::length_error("string too long"). The cap is only a
+					// sanity net against a corrupt stream, not a real size limit.
+					const auto endPos = saveFile.tellg();
+					if (endPos <= 0 || endPos > 64 * 1024 * 1024)
+						return retv;
+
+					const size_t size = static_cast<size_t>(endPos);
+					std::string buffer(size, ' ');
+					saveFile.seekg(0);
+					saveFile.read(buffer.data(), size);
+
+					// Reset the file pointer so we can start overwriting
+					saveFile.seekg(0);
+					buffer = FlcDecode(buffer);
+					writeFlhookSection(buffer);
+					data = FlcEncode(buffer);
 				}
-			};
+				else
+				{
+					saveFile.open(path, std::ios::app | std::ios::binary);
+					if (!saveFile.is_open())
+						return retv;
 
-			std::fstream saveFile;
-			std::string data;
-			if (encryptFiles)
-			{
-				saveFile.open(path, std::ios::ate | std::ios::in | std::ios::out | std::ios::binary);
+					writeFlhookSection(data);
+				}
 
-				// Copy old version that we plan to rewrite
-				auto size = static_cast<size_t>(saveFile.tellg());
-				std::string buffer(size, ' ');
-				saveFile.seekg(0);
-				saveFile.read(&buffer[0], size); 
-
-				// Reset the file pointer so we can start overwriting
-				saveFile.seekg(0);
-				buffer = FlcDecode(buffer);
-				writeFlhookSection(buffer);
-				data = FlcEncode(buffer);
+				saveFile.write(data.data(), data.size());
+				saveFile.close();
 			}
-			else
+			catch (...)
 			{
-				saveFile.open(path, std::ios::app | std::ios::binary);
-				writeFlhookSection(data);
+				return retv;
 			}
-
-			saveFile.write(data.c_str(), data.size());
-			saveFile.close();
 		}
 
 		return retv;
@@ -135,7 +163,7 @@ namespace Hk::Ini
 		if (patched)
 			return;
 
-		PatchCallAddr((char*)hModServer, 0x6c547, (char*)Cb_UpdateFileNaked);
+		Cb_UpdateFileOriginal = PatchCallAddr((char*)hModServer, 0x6c547, (char*)Cb_UpdateFileNaked);
 		PatchCallAddr((char*)hModServer, 0x6c9cd, (char*)Cb_UpdateFileNaked);
 
 		patched = true;
@@ -152,6 +180,7 @@ namespace Hk::Ini
 		BYTE patch2[] = {0xE8, 0xFE, 0x2, 0x00, 0x00};
 		WriteProcMem((char*)hModServer + 0x6c9cd, patch2, 5);
 
+		Cb_UpdateFileOriginal = nullptr;
 		patched = false;
 	}
 

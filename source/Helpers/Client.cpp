@@ -226,6 +226,9 @@ namespace Hk::Client
 
 	std::wstring GetAccountDirName(const CAccount* acc)
 	{
+		if (!acc || !acc->wszAccId)
+			return L"";
+
 		const auto GetFLName = reinterpret_cast<_GetFLName>(reinterpret_cast<char*>(hModServer) + 0x66370);
 
 		char szDir[1024] = "";
@@ -241,8 +244,7 @@ namespace Hk::Client
 		if (!GetFLName)
 			GetFLName = (_GetFLName)((char*)hModServer + 0x66370);
 
-		std::string buffer;
-		buffer.reserve(1024);
+		std::string buffer(1024, '\0');
 
 		if (ClientId client = Hk::Client::ExtractClientID(player); client != UINT_MAX)
 		{
@@ -260,6 +262,7 @@ namespace Hk::Client
 			return cpp::fail(Error::InvalidClientId);
 		}
 
+		buffer.resize(1024);
 		return stows(buffer);
 	}
 

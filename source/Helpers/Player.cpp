@@ -336,7 +336,15 @@ namespace Hk::Player
 		char szNop[2] = {'\x90', '\x90'};
 		char szTestAlAl[2] = {'\x74', '\x44'};
 		WriteProcMem(pJmp, szNop, sizeof(szNop)); // nop the SinglePlayer() check
-		pub::Save(client, 1);
+		try
+		{
+			pub::Save(client, 1);
+		}
+		catch (...)
+		{
+			WriteProcMem(pJmp, szTestAlAl, sizeof(szTestAlAl)); // restore
+			throw;
+		}
 		WriteProcMem(pJmp, szTestAlAl, sizeof(szTestAlAl)); // restore
 
 		return {};
@@ -860,6 +868,9 @@ namespace Hk::Player
 			acc = Players.FindAccountFromClientID(client);
 			if (const wchar_t* wszCharname = (wchar_t*)Players.GetActiveCharacterName(client); !wszCharname)
 				return cpp::fail(Error::CharacterNotSelected);
+
+			if (!acc.value())
+				return cpp::fail(Error::CannotGetAccount);
 
 			dir = Hk::Client::GetAccountDirName(acc.value());
 		}
@@ -1497,7 +1508,12 @@ namespace Hk::Player
 	{
 		if (ClientId client = Hk::Client::ExtractClientID(player); client != UINT_MAX && !Hk::Client::IsInCharSelectMenu(client))
 		{
+			// Note: deliberately ignore SaveChar's result. SaveChar rethrows on
+			// failure (after restoring its code patch), and ReadCharFile below
+			// reports any real problem. Returning early here would change the
+			// error code callers see for cases that already worked.
 			SaveChar(player);
+
 			if (!Hk::Client::IsValidClientID(client))
 			{
 				return cpp::fail(Error::UnknownError);
@@ -1553,8 +1569,8 @@ namespace Hk::Player
 				uint iGoodId = ToUInt(Trim(line.substr(iFindEqual + 1, iFindComma)));
 				uint iGoodCount = ToUInt(Trim(line.substr(iFindComma + 1, line.find(L",", iFindComma + 1))));
 
-				float fItemValue;
-				if (pub::Market::GetPrice(iBaseId, Arch2Good(iGoodId), fItemValue) == 0)
+				float fItemValue = 0.0f;
+				if (iBaseId && iGoodId && pub::Market::GetPrice(iBaseId, Arch2Good(iGoodId), fItemValue) == 0)
 				{
 					if (arch_is_combinable(iGoodId))
 					{
@@ -1580,15 +1596,18 @@ namespace Hk::Player
 			else if (wscKey == L"ship_archetype")
 			{
 				uint shipArchId = ToUInt(Trim(line.substr(line.find(L"=") + 1, line.length())));
-				const GoodInfo* gi = GoodList_get()->find_by_ship_arch(shipArchId);
-				if (gi)
+				if (const GoodInfoList* goodList = GoodList_get(); goodList)
 				{
-					gi = GoodList::find_by_id(gi->iArchId);
+					const GoodInfo* gi = goodList->find_by_ship_arch(shipArchId);
 					if (gi)
 					{
-						auto fResaleFactor = (float*)((char*)hModServer + 0x8AE78);
-						float fItemValue = gi->fPrice * (*fResaleFactor);
-						fValue += fItemValue;
+						gi = GoodList::find_by_id(gi->iArchId);
+						if (gi)
+						{
+							auto fResaleFactor = (float*)((char*)hModServer + 0x8AE78);
+							float fItemValue = gi->fPrice * (*fResaleFactor);
+							fValue += fItemValue;
+						}
 					}
 				}
 			}
@@ -1599,9 +1618,7 @@ namespace Hk::Player
 
 	void SaveChar(ClientId client)
 	{
-		BYTE patch[] = {0x90, 0x90};
-		WriteProcMem((char*)hModServer + 0x7EFA8, patch, sizeof(patch));
-		pub::Save(client, 1);
+		SaveChar(std::variant<uint, std::wstring>(client));
 	}
 
 	cpp::result<const ShipId, Error> GetTarget(const std::variant<uint, std::wstring>& player)
