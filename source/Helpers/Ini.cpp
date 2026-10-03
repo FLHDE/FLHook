@@ -80,12 +80,11 @@ namespace Hk::Ini
 						return retv;
 
 					// Copy old version that we plan to rewrite.
-					// tellg() returns -1 on a failed stream; casting that to a
-					// size_t yields SIZE_MAX and std::string then throws
-					// std::length_error("string too long"). The cap is only a
-					// sanity net against a corrupt stream, not a real size limit.
-					const auto endPos = saveFile.tellg();
-					if (endPos <= 0 || endPos > 64 * 1024 * 1024)
+					// tellg() returns pos_type(-1) if the stream failed. Casting
+					// that to a size_t yields SIZE_MAX, which makes the
+					// std::string below throw std::length_error("string too long").
+					const std::streampos endPos = saveFile.tellg();
+					if (endPos == std::streampos(-1))
 						return retv;
 
 					const size_t size = static_cast<size_t>(endPos);
