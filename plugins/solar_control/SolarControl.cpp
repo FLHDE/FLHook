@@ -18,6 +18,7 @@
  * @paragraph configuration Configuration
  * @code
  * {
+ *    "airlockDockRange": 1000.0,
  *    "baseRedirects": {
  *      "li01_01_base": "li01_02_base"
  *  },
