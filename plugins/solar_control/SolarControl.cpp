@@ -360,6 +360,11 @@ namespace Plugins::SolarControl
 			pub::Reputation::SetAffiliation(si.iRep, iff);
 		}
 
+		// Make sure the system is loaded. FLHook loads every system that has a base when the server starts; a system with no base stays unloaded until a
+		// ship enters it, and until then it has no physics. A solar created there gets no collision body, and one whose model has several parts throws in
+		// server.dll while it is being created. This does nothing when the system is already loaded
+		pub::System::LoadSystem(si.systemId);
+
 		// Spawn the solar object
 		uint spaceId;
 		CreateSolar(spaceId, si);
@@ -591,6 +596,9 @@ namespace Plugins::SolarControl
 	{
 		if (global->firstRun)
 		{
+			// Cleared before anything is spawned. If spawning one solar throws, the next login must not spawn the ones before it a second time
+			global->firstRun = false;
+
 			HookMissionSolarCreation();
 
 			for (const auto& [key, value] : global->config->solarArches)
@@ -609,24 +617,45 @@ namespace Plugins::SolarControl
 
 				CreateUserDefinedSolar(solar.name, solar.pos, solar.rot, solar.systemId, false, false);
 			}
-
-			global->firstRun = false;
 		}
 	}
 
 	/** @ingroup SolarControl
-	 * @brief Set target hook. Used to send a docking request if an airlock is selected since vanilla doesn't make this dockable by default
+	 * @brief Set target hook. Used to send a docking request if an airlock is selected since vanilla doesn't make this dockable by default. The player has to
+	 * be within the configured airlockDockRange of it. From further away they are told why nothing happens
 	 */
 	void SetTarget(const ClientId& client, struct XSetTarget const& target)
 	{
 		uint type;
 		pub::SpaceObj::GetType(target.iSpaceId, type);
 
-		if ((type & OBJ_AIRLOCK_GATE) && std::ranges::find(global->pendingDockingRequests, client) == global->pendingDockingRequests.end())
+		if (!(type & OBJ_AIRLOCK_GATE) || std::ranges::find(global->pendingDockingRequests, client) != global->pendingDockingRequests.end())
 		{
-			pub::SpaceObj::DockRequest(Hk::Player::GetShip(client).value(), target.iSpaceId);
-			global->pendingDockingRequests.emplace_back(client);
+			return;
 		}
+
+		const auto ship = Hk::Player::GetShip(client);
+		if (ship.has_error())
+		{
+			return;
+		}
+
+		// Listed until the timer clears it, so that neither the request nor the message is repeated if the client sends its target again
+		global->pendingDockingRequests.emplace_back(client);
+
+		Vector shipPosition {};
+		Vector airlockPosition {};
+		Matrix unused {};
+		pub::SpaceObj::GetLocation(ship.value(), shipPosition, unused);
+		pub::SpaceObj::GetLocation(target.iSpaceId, airlockPosition, unused);
+
+		if (Hk::Math::Distance3D(shipPosition, airlockPosition) > global->config->airlockDockRange)
+		{
+			PrintUserCmdText(client, L"Dock denied. Destination is too far.");
+			return;
+		}
+
+		pub::SpaceObj::DockRequest(ship.value(), target.iSpaceId);
 	}
 
 	/** @ingroup SolarControl
@@ -715,7 +744,7 @@ REFL_AUTO(type(SolarArchFormation), field(components));
 REFL_AUTO(type(SolarArchFormationComponent), field(solarArchName), field(relativePosition), field(rotation));
 REFL_AUTO(type(SolarArch), field(solarArch), field(loadout), field(iff), field(infocard), field(base), field(pilot));
 REFL_AUTO(type(StartupSolar), field(name), field(system), field(position), field(rotation));
-REFL_AUTO(type(Config), field(startupSolars), field(solarArches), field(baseRedirects), field(solarArchFormations));
+REFL_AUTO(type(Config), field(startupSolars), field(solarArches), field(baseRedirects), field(solarArchFormations), field(airlockDockRange));
 
 extern "C" EXPORT void ExportPluginInfo(PluginInfo* pluginInfo)
 {

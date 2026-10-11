@@ -54,6 +54,8 @@ namespace Plugins::SolarControl
 		//! The config file we load out of
 		std::string File() override { return "config/solar.json"; }
 		std::map<std::wstring, SolarArchFormation> solarArchFormations;
+		//! How close, in metres, a player must be to an airlock for selecting it to dock them
+		float airlockDockRange = 1000.0f;
 	};
 
 	//! Communicator class for this plugin. This is used by other plugins
