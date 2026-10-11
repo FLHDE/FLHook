@@ -162,9 +162,11 @@ namespace Plugins::SolarControl
 	}
 
 	/** @ingroup SolarControl
-	 * @brief Creates a solar from a solarInfo struct
+	 * @brief Creates a solar from a solarInfo struct. This also stands in for pub::SpaceObj::CreateSolar in content.dll (see HookMissionSolarCreation), so it
+	 * must keep that function's calling convention and return its result: content.dll treats anything but 0 as a failure and then skips giving the mission
+	 * solar its pilot
 	 */
-	void CreateSolar(uint& spaceId, pub::SpaceObj::SolarInfo& solarInfo)
+	int __cdecl CreateSolar(uint& spaceId, pub::SpaceObj::SolarInfo& solarInfo)
 	{
 		// Hack server.dll so it does not call create solar packet send
 		char* serverHackAddress = reinterpret_cast<char*>(hModServer) + 0x2A62A;
@@ -172,7 +174,7 @@ namespace Plugins::SolarControl
 		WriteProcMem(serverHackAddress, &serverHack, 1);
 
 		// Create the Solar
-		pub::SpaceObj::CreateSolar(spaceId, solarInfo);
+		const int result = pub::SpaceObj::CreateSolar(spaceId, solarInfo);
 
 		// Send solar creation packet
 		SendSolarPacket(spaceId, solarInfo);
@@ -180,6 +182,26 @@ namespace Plugins::SolarControl
 		// Undo the server.dll hack
 		constexpr char serverUnHack[] = {'\x74'};
 		WriteProcMem(serverHackAddress, &serverUnHack, 1);
+
+		return result;
+	}
+
+	/** @ingroup SolarControl
+	 * @brief Hooks solar creation in content.dll to fix fl-bug in MP where loadout is not sent. content.dll is not loaded yet when LoadSettings runs at
+	 * startup, so this has to be called later
+	 */
+	void HookMissionSolarCreation()
+	{
+		const HMODULE content = GetModuleHandle("content.dll");
+		if (!content)
+		{
+			Console::ConWarn("content.dll is not loaded. Mission solars will be sent to clients without their loadout");
+			return;
+		}
+
+		std::byte* addressCreateSolar = (reinterpret_cast<std::byte*>(content) + 0x1134D4);
+		auto const createSolar = reinterpret_cast<FARPROC>(CreateSolar);
+		WriteProcMem(addressCreateSolar, &createSolar, 4);
 	}
 
 	/** @ingroup SolarControl
@@ -532,11 +554,6 @@ namespace Plugins::SolarControl
 	 */
 	void LoadSettings()
 	{
-		// Hook solar creation to fix fl-bug in MP where loadout is not sent
-		std::byte* addressCreateSolar = (reinterpret_cast<std::byte*>(GetModuleHandle("content.dll")) + 0x1134D4);
-		auto const createSolar = reinterpret_cast<FARPROC>(CreateSolar);
-		WriteProcMem(addressCreateSolar, &createSolar, 4);
-
 		auto config = Serializer::JsonToObject<Config>();
 		global->spawnedSolars.clear();
 		global->log = spdlog::basic_logger_mt<spdlog::async_factory>("solars", "logs/solar.log");
@@ -568,12 +585,14 @@ namespace Plugins::SolarControl
 	}
 
 	/** @ingroup SolarControl
-	 * @brief We have to spawn here since the Startup/LoadSettings hooks are too early
+	 * @brief We have to spawn and hook content.dll here since the Startup/LoadSettings hooks are too early
 	 */
 	void Login([[maybe_unused]] struct SLoginInfo const& loginInfo, [[maybe_unused]] const uint& client)
 	{
 		if (global->firstRun)
 		{
+			HookMissionSolarCreation();
+
 			for (const auto& [key, value] : global->config->solarArches)
 			{
 				CheckSolar(key);
@@ -637,30 +656,41 @@ namespace Plugins::SolarControl
 
 	void PlayerLaunch([[maybe_unused]] ShipId& shipId, ClientId& client)
 	{
-		if (global->pendingRedirects.contains(client))
+		// Only players who docked at a base with a redirect have an entry, see BaseEnter
+		const auto redirect = global->pendingRedirects.find(client);
+		if (redirect == global->pendingRedirects.end())
 		{
-			const auto beamResult = Hk::Player::Beam(client, global->pendingRedirects[client]);
-			if (beamResult.has_error())
-			{
-				AddLog(LogType::Normal, LogLevel::Err, std::format("Error when beaming player: {}", wstos(Hk::Err::ErrGetText(beamResult.error()))));
-			}
-			else
-			{
-				PrintUserCmdText(client, L"Redirecting undock. Please launch again.");
-			}
+			return;
+		}
+
+		const uint redirectBase = redirect->second;
+		if (const auto beamResult = Hk::Player::Beam(client, redirectBase); beamResult.has_error())
+		{
+			AddLog(LogType::Normal, LogLevel::Err, std::format("Error when beaming player: {}", wstos(Hk::Err::ErrGetText(beamResult.error()))));
+
+			// The player was not moved, so there will be no arrival to clear the entry
+			global->pendingRedirects.erase(client);
+		}
+		else
+		{
+			PrintUserCmdText(client, L"Redirecting undock. Please launch again.");
 		}
 	}
 
 	//! Base Enter hook
 	void BaseEnter(const uint& baseId, ClientId& client)
 	{
-		if (global->pendingRedirects.contains(client))
+		// An entry at this point means the player has just been beamed here by a redirect. Clear it, so that their next launch from this base is a normal one
+		if (global->pendingRedirects.erase(client))
 		{
-			global->pendingRedirects.erase(client);
+			return;
 		}
-		else
+
+		// Bases without a redirect get no entry. Looking the base up with operator[] would add it to the map with a target of 0, and the launch would then
+		// try to beam the player to that
+		if (const auto redirect = global->config->hashedBaseRedirects.find(baseId); redirect != global->config->hashedBaseRedirects.end())
 		{
-			global->pendingRedirects[client] = global->config->hashedBaseRedirects[baseId];
+			global->pendingRedirects[client] = redirect->second;
 		}
 	}
 
