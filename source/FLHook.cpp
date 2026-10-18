@@ -606,16 +606,13 @@ bool ProcessSocketCmd(SOCKET_CONNECTION* sc, std::wstring wscCmd)
 send event to all sockets which are in eventmode
 **************************************************************************************************************/
 
-void ProcessEvent(std::wstring text, ...)
+void ProcessEvent(std::wstring text)
 {
-	wchar_t wszBuf[1024] = L"";
-	va_list marker;
-	va_start(marker, text);
-	_vsnwprintf_s(wszBuf, (sizeof(wszBuf) / 2) - 1, text.c_str(), marker);
-
-	text = wszBuf;
-
-	CallPluginsBefore(HookedCall::FLHook__ProcessEvent, static_cast<std::wstring&>(text));
+	// The message arrives already formatted: callers wrap themselves in std::format,
+	// exactly as AddLog's callers do. This used to take C varargs and format with
+	// _vsnwprintf_s, so every call site that had been converted to std::format-style
+	// {} placeholders broadcast its raw format string instead of the event.
+	CallPluginsBefore(HookedCall::FLHook__ProcessEvent, text);
 
 	for (auto& socket : lstSockets)
 	{

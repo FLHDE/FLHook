@@ -109,6 +109,15 @@ inline auto* ToWChar(ushort* val)
 	return reinterpret_cast<wchar_t*>(val);
 }
 
+// std::format on a null const wchar_t* is undefined, where the _vsnwprintf_s this
+// replaced merely printed "(null)". Players.GetActiveCharacterName returns null for
+// a client with no character selected, which happens around connect and disconnect.
+inline const wchar_t* ToWCharSafe(const ushort* val)
+{
+	const auto* str = ToWChar(val);
+	return str ? str : L"unknown";
+}
+
 inline auto* ToUShort(const wchar_t* val)
 {
 	return reinterpret_cast<const ushort*>(val);

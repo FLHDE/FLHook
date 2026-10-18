@@ -22,7 +22,7 @@
 using namespace magic_enum::bitwise_operators; // NOLINT
 using namespace magic_enum::ostream_operators; // NOLINT
 
-DLL void ProcessEvent(std::wstring text, ...);
+DLL void ProcessEvent(std::wstring text);
 
 // Tools
 class DLL Console

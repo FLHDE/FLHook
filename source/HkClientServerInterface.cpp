@@ -252,7 +252,7 @@ namespace IServerImplHook
 
 			eventString += L" text=";
 			eventString += buffer;
-			ProcessEvent(L"{}", eventString.c_str());
+			ProcessEvent(eventString);
 
 			// check if chat should be suppressed for in-built command prefixes
 			if (buffer[0] == L'/' || buffer[0] == L'.')
@@ -321,10 +321,10 @@ namespace IServerImplHook
 				ClientInfo[client].iLastExitedBaseId = 1;
 
 				// event
-				ProcessEvent(L"spawn char={} id={} system={}",
-				    ToWChar(Players.GetActiveCharacterName(client)),
+				ProcessEvent(std::format(L"spawn char={} id={} system={}",
+				    ToWCharSafe(Players.GetActiveCharacterName(client)),
 				    client,
-				    Hk::Client::GetPlayerSystem(client).value().c_str());
+				    Hk::Client::GetPlayerSystem(client).value()));
 			}
 		}
 		CATCH_HOOK({})
@@ -383,8 +383,8 @@ namespace IServerImplHook
 	}
 
 	// event
-	ProcessEvent(L"launch char={} id={} base={} system={}", ToWChar(Players.GetActiveCharacterName(client)), client,
-	    Hk::Client::GetBaseNickByID(ClientInfo[client].iLastExitedBaseId).value().c_str(), Hk::Client::GetPlayerSystem(client).value().c_str());
+	ProcessEvent(std::format(L"launch char={} id={} base={} system={}", ToWCharSafe(Players.GetActiveCharacterName(client)), client,
+	    Hk::Client::GetBaseNickByID(ClientInfo[client].iLastExitedBaseId).value(), Hk::Client::GetPlayerSystem(client).value()));
 } // namespace IServerImplHook
 CATCH_HOOK({})
 }
@@ -449,7 +449,7 @@ void CharacterSelect__InnerAfter(const CHARACTER_ID& cId, unsigned int client)
 			CAccount* acc = Players.FindAccountFromClientID(client);
 			std::wstring dir = Hk::Client::GetAccountDirName(acc);
 			auto pi = Hk::Admin::GetPlayerInfo(client, false);
-			ProcessEvent(L"login char={} accountdirname={} id={} ip={}", charName.c_str(), dir.c_str(), client, pi.value().wscIP.c_str());
+			ProcessEvent(std::format(L"login char={} accountdirname={} id={} ip={}", charName, dir, client, pi.value().wscIP));
 
 			MailManager::i()->SendMailNotification(client);
 
@@ -497,11 +497,11 @@ void BaseEnter__InnerAfter(uint baseId, ClientId client)
 		ClientInfo[client].iBaseEnterTime = static_cast<uint>(time(0));
 
 		// event
-		ProcessEvent(L"baseenter char={} id={} base={} system={}",
-		    ToWChar(Players.GetActiveCharacterName(client)),
+		ProcessEvent(std::format(L"baseenter char={} id={} base={} system={}",
+		    ToWCharSafe(Players.GetActiveCharacterName(client)),
 		    client,
-		    Hk::Client::GetBaseNickByID(baseId).value().c_str(),
-		    Hk::Client::GetPlayerSystem(client).value().c_str());
+		    Hk::Client::GetBaseNickByID(baseId).value(),
+		    Hk::Client::GetPlayerSystem(client).value()));
 
 		// print to log if the char has too much money
 		if (const wchar_t* wszCharname = (const wchar_t*)Players.GetActiveCharacterName(client); wszCharname)
@@ -534,11 +534,11 @@ void BaseExit__InnerAfter(uint baseId, ClientId client)
 {
 	TRY_HOOK
 	{
-		ProcessEvent(L"baseexit char={} id={} base={} system={}",
-		    ToWChar(Players.GetActiveCharacterName(client)),
+		ProcessEvent(std::format(L"baseexit char={} id={} base={} system={}",
+		    ToWCharSafe(Players.GetActiveCharacterName(client)),
 		    client,
-		    Hk::Client::GetBaseNickByID(baseId).value().c_str(),
-		    Hk::Client::GetPlayerSystem(client).value().c_str());
+		    Hk::Client::GetBaseNickByID(baseId).value(),
+		    Hk::Client::GetPlayerSystem(client).value()));
 	}
 	CATCH_HOOK({})
 }
@@ -728,7 +728,7 @@ void OnConnect__InnerAfter(ClientId client)
 	{
 		// event
 		std::wstring ip = Hk::Admin::GetPlayerIP(client);
-		ProcessEvent(L"connect id={} ip={}", client, ip.c_str());
+		ProcessEvent(std::format(L"connect id={} ip={}", client, ip));
 	}
 	CATCH_HOOK({})
 }
@@ -741,8 +741,8 @@ void DisConnect__Inner(ClientId client, EFLConnection)
 		ClientInfo[client].lstMoneyFix.clear();
 		ClientInfo[client].iTradePartner = 0;
 
-		const auto* charName = ToWChar(Players.GetActiveCharacterName(client));
-		ProcessEvent(L"disconnect char={} id={}", charName, client);
+		const auto* charName = ToWCharSafe(Players.GetActiveCharacterName(client));
+		ProcessEvent(std::format(L"disconnect char={} id={}", charName, client));
 	}
 }
 
@@ -755,10 +755,10 @@ void JumpInComplete__InnerAfter(uint systemId, uint shipId)
 			return;
 
 		// event
-		ProcessEvent(L"jumpin char={} id={} system={}",
-		    ToWChar(Players.GetActiveCharacterName(client.value())),
-		    client,
-		    Hk::Client::GetSystemNickByID(systemId).value().c_str());
+		ProcessEvent(std::format(L"jumpin char={} id={} system={}",
+		    ToWCharSafe(Players.GetActiveCharacterName(client.value())),
+		    client.value(),
+		    Hk::Client::GetSystemNickByID(systemId).value()));
 	}
 	CATCH_HOOK({})
 }
@@ -768,7 +768,7 @@ void SystemSwitchOutComplete__InnerAfter(uint, ClientId client)
 	TRY_HOOK
 	{
 		const auto system = Hk::Client::GetPlayerSystem(client);
-		ProcessEvent(L"switchout char={} id={} system={}", ToWChar(Players.GetActiveCharacterName(client)), client, system.value().c_str());
+		ProcessEvent(std::format(L"switchout char={} id={} system={}", ToWCharSafe(Players.GetActiveCharacterName(client)), client, system.value()));
 	}
 	CATCH_HOOK({})
 }
