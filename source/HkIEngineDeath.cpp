@@ -204,7 +204,7 @@ void __stdcall ShipDestroyed(DamageList* dmgList, DWORD* ecx, uint kill)
 					deathMessage = ReplaceStr(deathMessage, L"%type", killType);
 					if (FLHookConfig::i()->messages.dieMsg && deathMessage.length())
 						SendDeathMessage(deathMessage, systemId, client, clientKiller.value());
-					ProcessEvent(L"%s", eventStr.c_str());
+					ProcessEvent(eventStr);
 				}
 				else if (dmg.get_inflictor_id())
 				{
@@ -237,7 +237,7 @@ void __stdcall ShipDestroyed(DamageList* dmgList, DWORD* ecx, uint kill)
 
 					if (FLHookConfig::i()->messages.dieMsg && deathMessage.length())
 						SendDeathMessage(deathMessage, systemId, client, 0);
-					ProcessEvent(L"%s", eventStr.c_str());
+					ProcessEvent(eventStr);
 				}
 				else if (cause == DamageCause::Suicide)
 				{
@@ -246,7 +246,7 @@ void __stdcall ShipDestroyed(DamageList* dmgList, DWORD* ecx, uint kill)
 					if (std::wstring deathMessage = ReplaceStr(FLHookConfig::i()->messages.msgStyle.deathMsgTextSuicide, L"%victim", victimName);
 					    FLHookConfig::i()->messages.dieMsg && !deathMessage.empty())
 						SendDeathMessage(deathMessage, systemId, client, 0);
-					ProcessEvent(L"%s", eventStr.c_str());
+					ProcessEvent(eventStr);
 				}
 				else if (cause == DamageCause::Admin)
 				{
@@ -312,7 +312,7 @@ void BaseDestroyed(uint objectId, ClientId clientBy)
 		}
 	}
 
-	ProcessEvent(
-	    L"basedestroy basename=%s basehash=%u solarhash=%u by=%s", stows(baseName).c_str(), objectId, baseId,
-	    ToWChar(Players.GetActiveCharacterName(clientBy)));
+	ProcessEvent(std::format(
+	    L"basedestroy basename={} basehash={} solarhash={} by={}", stows(baseName), objectId, baseId,
+	    ToWCharSafe(Players.GetActiveCharacterName(clientBy))));
 }
